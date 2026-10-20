@@ -1,0 +1,76 @@
+name: Takipix APK
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Kodu al
+        uses: actions/checkout@v4
+
+      - name: Projeyi bul (gerekirse zip'ten cikar)
+        run: |
+          if [ -f pubspec.yaml ]; then
+            echo "PROJECT_DIR=$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
+          else
+            echo "Kokteki dosyalar:"; ls -la
+            mkdir -p /tmp/proje
+            for Z in ./*.zip; do
+              [ -f "$Z" ] || continue
+              echo "Zip aciliyor: $Z"
+              unzip -oq "$Z" -d /tmp/proje || true
+            done
+            P=$(find /tmp/proje -name pubspec.yaml -not -path '*/__MACOSX/*' | head -n 1)
+            if [ -z "$P" ]; then echo "Hicbir zip icinde pubspec.yaml yok"; exit 1; fi
+            echo "PROJECT_DIR=$(dirname "$P")" >> "$GITHUB_ENV"
+          fi
+
+      - name: Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Android iskeletini olustur
+        run: |
+          cd "$PROJECT_DIR"
+          mkdir -p /tmp/keep
+          cp pubspec.yaml /tmp/keep/pubspec.yaml
+          cp -r lib /tmp/keep/lib
+          flutter create . --platforms=android --org com.takipix --project-name takipix
+          cp /tmp/keep/pubspec.yaml pubspec.yaml
+          rm -rf lib && cp -r /tmp/keep/lib lib
+          rm -rf test
+          sed -i 's#</application>#    <meta-data android:name="io.flutter.embedding.android.EnableImpeller" android:value="false" />\n</application>#' android/app/src/main/AndroidManifest.xml
+
+      - name: Paketler ve ikon
+        run: |
+          cd "$PROJECT_DIR"
+          flutter pub get
+          dart run flutter_launcher_icons
+
+      - name: APK derle
+        run: |
+          cd "$PROJECT_DIR"
+          flutter build apk --release --no-shrink
+
+      - name: Dosyayi hazirla
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/cikti"
+          cp "$PROJECT_DIR/build/app/outputs/flutter-apk/app-release.apk" "$GITHUB_WORKSPACE/cikti/Takipix.apk"
+
+      - name: APK'yi yukle
+        uses: actions/upload-artifact@v4
+        with:
+          name: Takipix-APK
+          path: cikti/Takipix.apk
